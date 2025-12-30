@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Pro Collage Maker</title>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<style>
+  body { font-family: sans-serif; text-align: center; background: #f0f2f5; margin: 0; padding: 10px; touch-action: none; }
+  
+  #top-controls { 
+    background: white; padding: 15px; border-radius: 15px; 
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1); margin-bottom: 15px; 
+    display: inline-block; width: 95%; max-width: 580px;
+  }
+
+  .btn-group { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
+  .btn-group:last-child { margin-bottom: 0; }
+
+  /* Number Buttons */
+  .num-btn { width: 42px; height: 42px; border-radius: 50%; border: 2px solid #4a90e2; color: #4a90e2; font-size: 16px; background: white; font-weight: bold; cursor: pointer; }
+  .num-btn:hover { background: #4a90e2; color: white; }
+
+  button { 
+    font-size: 13px; border-radius: 8px; border: 1px solid #ddd; 
+    padding: 10px 14px; cursor: pointer; background: white; 
+    font-weight: bold; transition: 0.2s;
+  }
+  button:active { transform: scale(0.95); }
+
+  /* Colored Action Buttons */
+  .btn-undo { background: #e3f2fd; color: #1976d2; border: 1px solid #bbdefb; display: inline-flex; align-items: center; gap: 5px; }
+  .btn-redo { background: #e3f2fd; color: #1976d2; border: 1px solid #bbdefb; display: inline-flex; align-items: center; gap: 5px; }
+  .btn-layout { background: #f5f5f5; color: #333; }
+  .btn-before { background: #ff4757; color: white; border: none; } 
+  .btn-after { background: #2ed573; color: white; border: none; }  
+  .btn-dl { background: #2ed573; color: white; border: none; box-shadow: 0 2px 6px rgba(46,213,115,0.3); }
+  .btn-t { border-color: #4a90e2; color: #4a90e2; }
+  .btn-del { background: #555; color: white; border: none; display: none; }
+  
+  /* Color Picker Styling */
+  #colorPicker { width: 40px; height: 40px; border-radius: 5px; vertical-align: middle; border: 2px solid #eee; background: none; cursor: pointer; padding: 0; overflow: hidden; }
+
+  #collage {
+    position: relative; margin: 0 auto; 
+    width: 95%; max-width: 600px; 
+    height: 450px; background: white; 
+    border: 4px solid #333; display: flex; flex-direction: row; overflow: hidden;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+  }
+  #collage.vertical-mode { flex-direction: column !important; }
+  .box { flex: 1; border: 0.5px solid #eee; position: relative; overflow: hidden; background: #fdfdfd; display: flex; align-items: center; justify-content: center; }
+  .box img { position: absolute; transform-origin: center; touch-action: none; width: 100%; height: auto; }
+  .text-wrapper { position: absolute; top: 20%; left: 20%; z-index: 1000; touch-action: none; padding: 10px; cursor: move; }
+  .text-wrapper.active { border: 2px dashed #4a90e2; border-radius: 4px; background: rgba(74, 144, 226, 0.1); }
+  .editable-text { outline: none; font-size: 30px; color: black; font-weight: bold; white-space: nowrap; min-width: 20px; display: inline-block; }
+  .resize-arrow { width: 18px; height: 18px; position: absolute; right: -5px; bottom: -5px; cursor: nwse-resize; border-right: 4px solid #ff4757; border-bottom: 4px solid #ff4757; }
+</style>
+</head>
+<body onload="setCount(2)">
+
+<div id="top-controls">
+  <div class="btn-group">
+    <button class="num-btn" onclick="setCount(1)">1</button>
+    <button class="num-btn" onclick="setCount(2)">2</button>
+    <button class="num-btn" onclick="setCount(3)">3</button>
+    <button class="num-btn" onclick="setCount(4)">4</button>
+  </div>
+
+  <div class="btn-group">
+    <button class="btn-layout" onclick="toggleLayout()">↔ Switch Layout</button>
+    <button class="btn-undo" onclick="undo()">⟲ Undo</button>
+    <button class="btn-redo" onclick="redo()">⟳ Redo</button>
+  </div>
+  
+  <hr style="border: 0; border-top: 1px solid #eee; margin: 10px 0;">
+
+  <div class="btn-group">
+    <button class="btn-before" onclick="addAutoText('Before')">Before</button>
+    <button class="btn-after" onclick="addAutoText('After')">After</button>
+    <button class="btn-t" onclick="addAutoText('Text')">T</button>
+    <input type="color" id="colorPicker" value="#4a90e2" oninput="changeTextColor(this.value)">
+    <button id="delBtn" class="btn-del" onclick="deleteSelectedText()">🗑️</button>
+    <button class="btn-dl" onclick="downloadCollage()">💾 Download</button>
+  </div>
+</div>
+
+<div id="collage"></div>
+<input id="fileInput" type="file" accept="image/*" hidden onchange="loadImages(event)">
+
+<script>
+let currentBox = null;
+let selectedWrapper = null;
+let selectedTextElement = null;
+let history = [];
+let redoStack = [];
+
+function saveState() {
+  const collage = document.getElementById("collage");
+  history.push(collage.innerHTML);
+  if (history.length > 25) history.shift();
+  redoStack = []; 
+}
+
+function undo() {
+  if (history.length > 0) {
+    const collage = document.getElementById("collage");
+    redoStack.push(collage.innerHTML);
+    const prevState = history.pop();
+    collage.innerHTML = prevState;
+    reassignEvents();
+  }
+}
+
+function redo() {
+  if (redoStack.length > 0) {
+    const collage = document.getElementById("collage");
+    history.push(collage.innerHTML);
+    const nextState = redoStack.pop();
+    collage.innerHTML = nextState;
+    reassignEvents();
+  }
+}
+
+function reassignEvents() {
+  const collage = document.getElementById("collage");
+  collage.querySelectorAll('.box').forEach(box => {
+    box.onclick = (e) => { if(e.target.tagName !== 'IMG') { currentBox = box; document.getElementById("fileInput").click(); } };
+  });
+  collage.querySelectorAll('img').forEach(img => makeImageInteractive(img));
+  collage.querySelectorAll('.text-wrapper').forEach(wrapper => {
+    const text = wrapper.querySelector('.editable-text');
+    const arrow = wrapper.querySelector('.resize-arrow');
+    setupTextInteraction(wrapper, arrow, text);
+    wrapper.onclick = (e) => { selectWrapper(wrapper, text); e.stopPropagation(); };
+  });
+}
+
+function toggleLayout() { saveState(); document.getElementById("collage").classList.toggle("vertical-mode"); }
+
+function setCount(count){
+  saveState();
+  const collage = document.getElementById("collage");
+  const existingTexts = Array.from(collage.querySelectorAll('.text-wrapper'));
+  collage.innerHTML = "";
+  for(let i=0; i<count; i++){
+    const div = document.createElement("div");
+    div.className = "box";
+    div.innerHTML = "<span style='font-size:11px;color:#aaa;'>Add Photo</span>";
+    div.onclick = (e) => { if(e.target.tagName !== 'IMG') { currentBox = div; document.getElementById("fileInput").click(); } };
+    collage.appendChild(div);
+  }
+  existingTexts.forEach(el => collage.appendChild(el));
+}
+
+function loadImages(event){
+  const file = event.target.files[0];
+  if(!file || !currentBox) return;
+  saveState();
+  const img = document.createElement("img");
+  img.src = URL.createObjectURL(file);
+  currentBox.innerHTML = "";
+  currentBox.appendChild(img);
+  makeImageInteractive(img);
+}
+
+function makeImageInteractive(img) {
+  let scale = 1, lastScale = 1, posX = 0, posY = 0, startX = 0, startY = 0, initialDistance = null;
+  img.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 1) { startX = e.touches[0].clientX - posX; startY = e.touches[0].clientY - posY; }
+    else if (e.touches.length === 2) { initialDistance = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); lastScale = scale; }
+  });
+  img.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    if (e.touches.length === 1) { posX = e.touches[0].clientX - startX; posY = e.touches[0].clientY - startY; }
+    else if (e.touches.length === 2 && initialDistance) {
+      const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+      scale = Math.max(0.1, lastScale * (dist / initialDistance));
+    }
+    img.style.transform = `translate(${posX}px, ${posY}px) scale(${scale})`;
+  });
+  img.addEventListener('touchend', () => { saveState(); });
+}
+
+function addAutoText(val) {
+  saveState();
+  const collage = document.getElementById("collage");
+  const wrapper = document.createElement("div");
+  wrapper.className = "text-wrapper";
+  wrapper.style.left = "30%"; wrapper.style.top = "20%";
+  const text = document.createElement("div");
+  text.className = "editable-text";
+  text.contentEditable = true;
+  text.innerText = val;
+  text.style.color = "#ffffff";
+  text.style.textShadow = "2px 2px 4px rgba(0,0,0,0.8)";
+  wrapper.onclick = (e) => { selectWrapper(wrapper, text); e.stopPropagation(); };
+  const arrow = document.createElement("div");
+  arrow.className = "resize-arrow";
+  wrapper.appendChild(text);
+  wrapper.appendChild(arrow);
+  collage.appendChild(wrapper);
+  setupTextInteraction(wrapper, arrow, text);
+}
+
+function selectWrapper(wrapper, text) {
+  document.querySelectorAll('.text-wrapper').forEach(w => w.classList.remove('active'));
+  wrapper.classList.add('active');
+  selectedWrapper = wrapper;
+  selectedTextElement = text;
+  document.getElementById('delBtn').style.display = 'inline-block';
+}
+
+function deleteSelectedText() {
+  if (selectedWrapper) {
+    saveState();
+    selectedWrapper.remove();
+    selectedWrapper = null;
+    document.getElementById('delBtn').style.display = 'none';
+  }
+}
+
+function changeTextColor(color) { if (selectedTextElement) { saveState(); selectedTextElement.style.color = color; } }
+
+function setupTextInteraction(wrapper, arrow, textEl) {
+  let isDragging = false, isResizing = false, startX, startY, startFontSize;
+  const start = (e) => {
+    const cx = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
+    const cy = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
+    if (e.target === arrow) { isResizing = true; startX = cx; startFontSize = parseFloat(window.getComputedStyle(textEl).fontSize); e.preventDefault(); }
+    else { isDragging = true; startX = cx - wrapper.offsetLeft; startY = cy - wrapper.offsetTop; }
+  };
+  const move = (e) => {
+    if (!isDragging && !isResizing) return;
+    const cx = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
+    const cy = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
+    if (isDragging) { wrapper.style.left = (cx - startX) + "px"; wrapper.style.top = (cy - startY) + "px"; }
+    if (isResizing) { textEl.style.fontSize = Math.max(10, startFontSize + (cx - startX) * 0.5) + "px"; }
+  };
+  wrapper.addEventListener('touchstart', start, {passive: false});
+  document.addEventListener('touchmove', move, {passive: false});
+  document.addEventListener('touchend', () => { if(isDragging || isResizing) saveState(); isDragging = false; isResizing = false; });
+}
+
+function downloadCollage(){
+  const arrows = document.querySelectorAll('.resize-arrow');
+  const wrappers = document.querySelectorAll('.text-wrapper');
+  arrows.forEach(a => a.style.display = 'none');
+  wrappers.forEach(w => w.classList.remove('active'));
+  html2canvas(document.getElementById("collage"), { scale: 2 }).then(canvas => {
+    const link = document.createElement("a");
+    link.download = "collage.png";
+    link.href = canvas.toDataURL();
+    link.click();
+    arrows.forEach(a => a.style.display = 'block');
+  });
+}
+</script>
+</body>
+</html>
